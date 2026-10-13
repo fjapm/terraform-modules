@@ -1,6 +1,7 @@
 variable "vps" {
   type = object({
     name             = string
+    hostname         = optional(string)
     image            = string
     server_type      = string
     location         = string

@@ -37,6 +37,9 @@ data "cloudinit_config" "init" {
   part {
     content_type = "text/cloud-config"
     content = yamlencode({
+      hostname = coalesce(var.vps.hostname, var.vps.name),
+      preserve_hostname = false,
+      manage_etc_hosts = true,
       disable_root = false,
       users = [
         {
