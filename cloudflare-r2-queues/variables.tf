@@ -98,9 +98,28 @@ variable "queue_visibility_timeout_ms" {
 }
 
 variable "queue_message_retention_seconds" {
-  description = "How long the queue and its DLQ keep an unconsumed message."
+  description = <<-EOT
+    How long the queue and its DLQ keep an unconsumed message.
+
+    Capped at 24 hours by the API, which is lower than the retention figure
+    quoted in parts of the Cloudflare Queues documentation. The default used to
+    be 345600 (4 days) and every apply failed on it:
+
+      POST /accounts/{id}/queues -> 400, code 100128
+      "Queue '<name>-dlq' has invalid settings:
+       message_retention_period must be between 60 and 86400 seconds."
+
+    The default is now the maximum, because the value matters most for the DLQ:
+    it bounds how long you have to notice and inspect a failed job before the
+    evidence is discarded.
+  EOT
   type        = number
-  default     = 345600
+  default     = 86400
+
+  validation {
+    condition     = var.queue_message_retention_seconds >= 60 && var.queue_message_retention_seconds <= 86400
+    error_message = "Between 60 and 86400 seconds (1 minute to 24 hours)."
+  }
 }
 
 # ---------------------------------------------------------------------------
