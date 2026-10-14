@@ -60,8 +60,31 @@ audit trails, not tighter scope. If you need a credential that genuinely cannot
 read `other-prefix/`, you need a second bucket.
 
 Permission groups are resolved by name at plan time via
-`cloudflare_api_token_permission_groups_list`, so there are no hardcoded hex IDs
-to go stale.
+`cloudflare_account_api_token_permission_groups_list`, so there are no
+hardcoded hex IDs to go stale.
+
+## The credential this module needs
+
+An **account-owned** API token (the `cfat_` prefix) is enough. Nothing here
+touches a `/user/...` endpoint, which matters because an account-owned token
+gets `403` code `9109`, *"Valid user-level authentication not found"*, from
+every one of them.
+
+Two deliberate choices keep it that way, and both are easy to undo by accident:
+
+- the permission-group lookup is the `..._account_api_token_...` data source,
+  not the user-scoped `cloudflare_api_token_permission_groups_list`;
+- the tokens are `cloudflare_account_token`, not `cloudflare_api_token`. The
+  latter has no `account_id` because it POSTs to `/user/tokens`.
+
+Required scopes on that token: *Workers R2 Storage Write*, *Queues Write*,
+*Workers Scripts Write* and *API Tokens Write*.
+
+The lookup is also filtered to the four groups actually used. That is not
+tidiness: of the 410 groups the account list returns, seven names appear twice
+under different scopes with different IDs, and a map comprehension over the
+whole list evaluates its value expression for every key — so those seven would
+break `one()` and the module with it, without being referenced anywhere.
 
 ## Inputs
 

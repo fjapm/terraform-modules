@@ -3,11 +3,29 @@ locals {
   dlq_name   = "${var.name_prefix}-${var.queue_suffix}-dlq"
 
   # Permission groups are looked up by name rather than hardcoded as hex IDs.
-  # The API returns duplicates for some groups (the same name under different
-  # scopes), hence the grouping ellipsis and the one(distinct(...)) collapse.
+  #
+  # The lookup is restricted to exactly the groups used below, and that filter
+  # is load-bearing rather than tidiness. The account list returns 410 groups,
+  # of which seven names appear twice under different scopes -- "Logs Read",
+  # "Access: Apps and Policies Read" and friends exist once for
+  # com.cloudflare.api.account and once for com.cloudflare.api.account.zone,
+  # with DIFFERENT ids. A map comprehension over the whole list evaluates its
+  # value expression for every key, so those seven would make one() fail and
+  # take the entire module with them, despite nothing here referencing them.
+  # distinct() does not help: the ids genuinely differ.
+  #
+  # All four names below are unique in the account list, so one() is a real
+  # assertion -- it fails loudly if Cloudflare ever renames or splits one.
+  required_permission_groups = [
+    "Workers R2 Storage Bucket Item Read",
+    "Workers R2 Storage Bucket Item Write",
+    "Queues Read",
+    "Queues Write",
+  ]
+
   permission_groups_by_name = {
-    for pg in data.cloudflare_api_token_permission_groups_list.all.result :
-    pg.name => pg.id...
+    for pg in data.cloudflare_account_api_token_permission_groups_list.all.result :
+    pg.name => pg.id... if contains(local.required_permission_groups, pg.name)
   }
 
   permission_group_ids = {
@@ -35,8 +53,16 @@ locals {
   } : null
 }
 
-data "cloudflare_api_token_permission_groups_list" "all" {
-  max_items = 1000
+# The account-scoped list, not the user-scoped one. Both exist; the difference
+# decides which kind of credential can run this module at all.
+#
+# cloudflare_api_token_permission_groups_list reads GET /user/tokens/
+# permission_groups, which rejects an account-owned token (the `cfat_` prefix)
+# with 403 code 9109, "Valid user-level authentication not found". Paired with
+# cloudflare_account_token below, this module needs no user-level credential.
+data "cloudflare_account_api_token_permission_groups_list" "all" {
+  account_id = var.account_id
+  max_items  = 1000
 }
 
 # ---------------------------------------------------------------------------
@@ -115,13 +141,27 @@ resource "cloudflare_r2_bucket_event_notification" "this" {
 
 # ---------------------------------------------------------------------------
 # Scoped credentials
+#
+# cloudflare_account_token, not cloudflare_api_token. The two differ only by
+# who owns the token they create: cloudflare_api_token has no account_id
+# argument because it POSTs to /user/tokens, which means the credential
+# running Terraform must itself be user-owned. Account-owned tokens are the
+# better fit anyway -- they outlive any individual's membership of the
+# account, which a user-owned token does not.
+#
+# Changing between the two types is a REPLACEMENT, not a move: the resource
+# type is part of the address, so no moved block can bridge it. On an existing
+# deployment this destroys and recreates every token here, which rotates the
+# R2 access keys and the queue bearer token. Re-run `make vidra-env` and
+# restart the runner afterwards.
 # ---------------------------------------------------------------------------
 
-resource "cloudflare_api_token" "r2" {
+resource "cloudflare_account_token" "r2" {
   for_each = toset(var.r2_token_names)
 
-  name   = "${var.name_prefix}-${each.key}-r2"
-  status = "active"
+  account_id = var.account_id
+  name       = "${var.name_prefix}-${each.key}-r2"
+  status     = "active"
 
   policies = [{
     effect    = "allow"
@@ -138,11 +178,12 @@ resource "cloudflare_api_token" "r2" {
 # Queues Write is required as well as Read: acknowledging a message is a write,
 # so a read-only token produces a 403 on the first ack and the consumer loops
 # forever on the same batch.
-resource "cloudflare_api_token" "queue" {
+resource "cloudflare_account_token" "queue" {
   count = var.create_queue_token ? 1 : 0
 
-  name   = "${var.name_prefix}-queue-consumer"
-  status = "active"
+  account_id = var.account_id
+  name       = "${var.name_prefix}-queue-consumer"
+  status     = "active"
 
   policies = [{
     effect    = "allow"

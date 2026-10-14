@@ -50,7 +50,7 @@ output "r2_credentials" {
   description = "Per-token S3 credentials for the bucket, keyed by r2_token_names."
   sensitive   = true
   value = {
-    for name, token in cloudflare_api_token.r2 :
+    for name, token in cloudflare_account_token.r2 :
     name => {
       access_key_id     = token.id
       secret_access_key = sha256(token.value)
@@ -61,5 +61,5 @@ output "r2_credentials" {
 output "queue_api_token" {
   description = "Bearer token for the Queues pull/ack API. Null when create_queue_token is false."
   sensitive   = true
-  value       = var.create_queue_token ? cloudflare_api_token.queue[0].value : null
+  value       = var.create_queue_token ? cloudflare_account_token.queue[0].value : null
 }
