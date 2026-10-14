@@ -19,12 +19,26 @@ resource "hcloud_firewall" "base" {
   labels = var.labels
 
   # --- Allow SSH (key-only), rate-limited at the UFW level ---
-  rule {
-    direction   = "in"
-    protocol    = "tcp"
-    port        = "22"
-    source_ips  = var.vps.ssh_source_ips
-    description = "SSH (key-only)"
+  #
+  # Omitted entirely when ssh_source_ips is empty, rather than emitted with an
+  # empty list. Hetzner rejects the latter:
+  #
+  #   invalid input in field 'rules' (invalid_input):
+  #   [rules[0].source_ips => [source_ips needs to have at least one entry]]
+  #
+  # And "no rule" is the honest encoding of "no public SSH", which is the right
+  # shape for a host reachable only over a tailnet or a private network. A
+  # firewall with no rules at all is valid and denies every inbound packet,
+  # since Hetzner has no implicit allow.
+  dynamic "rule" {
+    for_each = length(var.vps.ssh_source_ips) > 0 ? [1] : []
+    content {
+      direction   = "in"
+      protocol    = "tcp"
+      port        = "22"
+      source_ips  = var.vps.ssh_source_ips
+      description = "SSH (key-only)"
+    }
   }
 
   # --- User-supplied rules ---
